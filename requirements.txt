@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+google-generativeai
+python-dotenv
+jinja2
+python-multipart

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="space-y-6">
+  <h1 class="text-2xl font-bold">All Prompt Versions</h1>
+
+  {% if not versions %}
+    <p class="text-gray-500">
+      No versions yet.
+      <a href="/" class="text-blue-600 underline">Go to the home page to generate.</a>
+    </p>
+  {% else %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm border-collapse bg-white rounded-lg border">
+        <thead>
+          <tr class="bg-gray-50 text-left text-gray-500 uppercase text-xs tracking-wide">
+            <th class="px-4 py-3 border-b">Version</th>
+            <th class="px-4 py-3 border-b">Accuracy</th>
+            <th class="px-4 py-3 border-b">Prompt Preview</th>
+            <th class="px-4 py-3 border-b">Created</th>
+            <th class="px-4 py-3 border-b">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in versions %}
+            {# Jinja2 if/else — same as Python #}
+            <tr class="{% if v.id == best_id %}border-l-4 border-l-yellow-400{% endif %}">
+              <td class="px-4 py-3 border-b font-medium">
+                v{{ v.version_number }}
+                {% if v.id == best_id %}
+                  <span class="ml-2 text-xs text-yellow-600 font-semibold">BEST</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 border-b">
+                {% if v.accuracy_score is none %}
+                  <span class="text-gray-400">Not evaluated</span>
+                {% elif v.accuracy_score >= 0.8 %}
+                  <span class="text-green-600 font-semibold">{{ (v.accuracy_score * 100) | int }}%</span>
+                {% else %}
+                  <span class="text-orange-500 font-semibold">{{ (v.accuracy_score * 100) | int }}%</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 border-b text-gray-600 font-mono text-xs cursor-default"
+                  data-prompt="{{ v.prompt_text }}"
+                  onmouseenter="showPrompt(this)"
+                  onmouseleave="hidePrompt()">
+                {{ v.prompt_text[:80] }}…
+              </td>
+              <td class="px-4 py-3 border-b text-gray-500">
+                {{ v.created_at.strftime("%Y-%m-%d") }}
+              </td>
+              <td class="px-4 py-3 border-b space-x-3">
+                {% if v.accuracy_score is none %}
+                  <button
+                    id="eval-btn-{{ v.id }}"
+                    onclick="handleEvaluate({{ v.id }})"
+                    class="text-sm bg-green-600 hover:bg-green-700 text-white font-medium px-3 py-1 rounded"
+                  >
+                    Evaluate
+                  </button>
+                {% else %}
+                  <a href="/results/{{ v.id }}" class="text-blue-600 hover:underline text-sm">
+                    View Results
+                  </a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>
+
+<div id="prompt-tooltip"
+     class="hidden fixed z-50 max-w-xl bg-white border border-gray-200 rounded-lg shadow-xl p-4
+            text-xs font-mono text-gray-700 whitespace-pre-wrap max-h-96 overflow-y-auto pointer-events-none">
+</div>
+
+<script>
+  function showPrompt(cell) {
+    const tooltip = document.getElementById("prompt-tooltip");
+    tooltip.textContent = cell.dataset.prompt;
+    tooltip.classList.remove("hidden");
+
+    const rect = cell.getBoundingClientRect();
+    const gap = 8;
+
+    // Prefer below the cell; flip above if it would go off-screen
+    const spaceBelow = window.innerHeight - rect.bottom;
+    if (spaceBelow >= 160 || spaceBelow >= window.innerHeight - rect.top) {
+      tooltip.style.top = (rect.bottom + window.scrollY + gap) + "px";
+    } else {
+      tooltip.style.top = "";
+      tooltip.style.bottom = (window.innerHeight - rect.top + gap - window.scrollY) + "px";
+    }
+
+    // Align to left edge of cell, but don't overflow right side of viewport
+    const left = Math.min(rect.left, window.innerWidth - tooltip.offsetWidth - 16);
+    tooltip.style.left = Math.max(8, left) + "px";
+  }
+
+  function hidePrompt() {
+    document.getElementById("prompt-tooltip").classList.add("hidden");
+  }
+
+  async function handleEvaluate(versionId) {
+    const btn = document.getElementById("eval-btn-" + versionId);
+    btn.textContent = "Evaluating…";
+    btn.disabled = true;
+
+    try {
+      const res = await fetch("/api/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt_version_id: versionId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Unknown error");
+      window.location.href = "/results/" + versionId;
+    } catch (e) {
+      btn.textContent = "Error: " + e.message;
+      btn.disabled = false;
+    }
+  }
+</script>
+
+{% endblock %}

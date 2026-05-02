@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="space-y-8">
+  <h1 class="text-2xl font-bold">Customer Service Agent — Prompt Evaluation</h1>
+
+  <!-- Section 1: Scenario overview (static, no JS needed) -->
+  <section class="bg-white rounded-lg border p-5 space-y-4">
+    <h2 class="font-semibold text-lg">Scenario</h2>
+    <p class="text-gray-700">
+      A customer service agent for an e-commerce platform that helps customers with
+      order status, refunds, and escalations.
+    </p>
+    <div>
+      <h3 class="font-medium text-sm text-gray-500 uppercase tracking-wide mb-2">Available Tools</h3>
+      <ul class="space-y-2">
+        <li class="flex gap-2">
+          <code class="bg-gray-100 px-2 py-0.5 rounded text-sm font-mono">lookup_order</code>
+          <span class="text-gray-600 text-sm">Look up the current status of a customer order.</span>
+        </li>
+        <li class="flex gap-2">
+          <code class="bg-gray-100 px-2 py-0.5 rounded text-sm font-mono">process_refund</code>
+          <span class="text-gray-600 text-sm">Initiate a refund for a customer order.</span>
+        </li>
+        <li class="flex gap-2">
+          <code class="bg-gray-100 px-2 py-0.5 rounded text-sm font-mono">escalate_to_human</code>
+          <span class="text-gray-600 text-sm">Escalate the conversation to a human support agent.</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Section 2: Generate button -->
+  <section>
+    <p id="error-msg" class="text-red-600 text-sm mb-3 hidden"></p>
+    <button
+      id="generate-btn"
+      onclick="handleGenerate()"
+      class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-lg"
+    >
+      Generate 2 Prompt Candidates
+    </button>
+  </section>
+
+  <!-- Section 3: Version cards — hidden until generate succeeds -->
+  <section id="versions-section" class="hidden space-y-3">
+    <h2 class="font-semibold text-lg">Generated Prompt Candidates</h2>
+    <div id="version-cards" class="grid grid-cols-2 gap-4"></div>
+  </section>
+</div>
+
+<script>
+  async function handleGenerate() {
+    const btn = document.getElementById("generate-btn");
+    const errorMsg = document.getElementById("error-msg");
+    btn.textContent = "Generating…";
+    btn.disabled = true;
+    errorMsg.classList.add("hidden");
+
+    try {
+      // fetch() sends an HTTP request — like Python's requests.post()
+      const res = await fetch("/api/generate", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Unknown error");
+
+      // Hide the generate button, show the version cards
+      btn.classList.add("hidden");
+      showVersionCards(data.versions);
+    } catch (e) {
+      errorMsg.textContent = "Error: " + e.message;
+      errorMsg.classList.remove("hidden");
+      btn.textContent = "Generate 2 Prompt Candidates";
+      btn.disabled = false;
+    }
+  }
+
+  function showVersionCards(versions) {
+    const section = document.getElementById("versions-section");
+    const container = document.getElementById("version-cards");
+    section.classList.remove("hidden");
+
+    container.innerHTML = versions.map(v =>
+      '<div class="bg-white border rounded-lg p-5 space-y-3">' +
+        '<p class="font-medium">Prompt v' + v.version_number + '</p>' +
+        '<button ' +
+          'onclick="handleEvaluate(' + v.id + ')" ' +
+          'id="eval-btn-' + v.id + '" ' +
+          'class="bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded">' +
+          'Evaluate against test suite' +
+        '</button>' +
+      '</div>'
+    ).join("");
+  }
+
+  async function handleEvaluate(versionId) {
+    const btn = document.getElementById("eval-btn-" + versionId);
+    btn.textContent = "Evaluating… (this takes ~30s)";
+    btn.disabled = true;
+
+    try {
+      const res = await fetch("/api/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // JSON.stringify converts a JS object to a JSON string — like Python's json.dumps()
+        body: JSON.stringify({ prompt_version_id: versionId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Unknown error");
+
+      // Navigate to the results page
+      window.location.href = "/results/" + versionId;
+    } catch (e) {
+      btn.textContent = "Error: " + e.message;
+      btn.disabled = false;
+    }
+  }
+</script>
+
+{% endblock %}
