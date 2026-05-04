@@ -5,6 +5,7 @@ from typing import Optional
 
 import google.generativeai as genai
 from google.generativeai import protos
+from google.generativeai.types import GenerationConfig
 
 # Configure the client once at module load using the API key from .env
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
@@ -49,11 +50,11 @@ def generate_prompt_candidates(scenario_description: str, tool_schemas: list[dic
     """
     Ask Gemini to write 2 distinct system prompts for the scenario.
     Returns a list of 2 prompt strings.
+
+    Uses temperature=1.0 to encourage diversity between the two candidates
+    (this is the SEARCH layer — randomness is desired here).
     """
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        temperature = 1.0,
-    )
+    model = genai.GenerativeModel(model_name="gemini-2.5-flash")
     tool_names = ", ".join(s["name"] for s in tool_schemas)
 
     response = model.generate_content(
@@ -69,7 +70,8 @@ Requirements:
 - Make the distinction between tools explicit to avoid wrong-function errors
 
 Return ONLY valid JSON in this exact format, no explanation:
-{{"prompts": ["<prompt 1 text>", "<prompt 2 text>"]}}"""
+{{"prompts": ["<prompt 1 text>", "<prompt 2 text>"]}}""",
+        generation_config=GenerationConfig(temperature=1.0),
     )
 
     text = response.text
@@ -89,15 +91,21 @@ def call_with_system_prompt(
     Simulate the agent: send a user message with a given system prompt and tool list.
     Returns {"function_name": str, "params": dict} if Gemini made a tool call,
     or None if Gemini responded in plain text (maps to format_error in the evaluator).
+
+    Uses temperature=0 for DETERMINISTIC EVALUATION — this is the MEASUREMENT layer.
+    Without this, repeated runs of the same prompt yield different accuracy scores,
+    making version comparisons meaningless.
     """
     model = genai.GenerativeModel(
         "gemini-2.5-flash",
         tools=[_to_tool(tool_schemas)],
         system_instruction=system_prompt,
-        temperature = 0.0,
     )
 
-    response = model.generate_content(user_message)
+    response = model.generate_content(
+        user_message,
+        generation_config=GenerationConfig(temperature=0), 
+    )
 
     try:
         part = response.candidates[0].content.parts[0]
@@ -117,11 +125,12 @@ def refine_prompt(current_prompt: str, failure_summary: str) -> str:
     """
     Takes the current system prompt + failure summary.
     Returns an improved prompt targeting those failures.
+
+    Uses temperature=0.7 — moderate randomness for refinement.
+    Lower than candidate generation (1.0) because we want directed improvement,
+    higher than evaluation (0) because we want some exploration of fix strategies.
     """
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        temperature = 1.0,
-    )
+    model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
     response = model.generate_content(
         f"""You are a prompt engineer improving a system prompt for an AI tool-calling agent.
@@ -137,7 +146,8 @@ Failure analysis from running the prompt against test cases:
 Write an improved system prompt that specifically addresses the dominant failure type.
 - Be explicit about the distinction that caused the failures
 - Keep the prompt concise
-- Return ONLY the improved prompt text, no explanation, no surrounding quotes"""
+- Return ONLY the improved prompt text, no explanation, no surrounding quotes""",
+        generation_config=GenerationConfig(temperature=0.7),
     )
 
     return response.text or current_prompt
