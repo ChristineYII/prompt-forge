@@ -6,7 +6,7 @@ Run once after wiping the DB:
 from lib.db import SessionLocal, Scenario, TestCase, create_tables
 
 
-# Customer service tool schemas — must match TOOL_SCHEMAS in lib/constants.py
+# Customer service tool schemas used to seed the baseline DB scenario.
 CUSTOMER_SERVICE_TOOLS = [
     {
         "name": "lookup_order",

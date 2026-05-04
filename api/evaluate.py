@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from lib.db import get_db, PromptVersion, TestCase, EvaluationResult
 from lib.gemini import call_with_system_prompt
 from lib.evaluator import evaluate_single_call
-from lib.constants import TOOL_SCHEMAS
 
 router = APIRouter()
 
@@ -36,9 +35,10 @@ def evaluate(body: EvaluateRequest, db: Session = Depends(get_db)):
                    f"Run seed_phase0.py or create test cases first."
         )
 
-    # Use the scenario's tool schemas if available (Phase 1+),
-    # else fall back to the legacy global TOOL_SCHEMAS constant (Phase 0).
-    tools = version.scenario.tools_json if version.scenario.tools_json else TOOL_SCHEMAS
+    if not version.scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found for prompt version")
+
+    tools = version.scenario.tools_json
 
     results = []
     for test_case in test_cases:

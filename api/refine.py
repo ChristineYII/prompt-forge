@@ -51,10 +51,16 @@ def refine(body: RefineRequest, db: Session = Depends(get_db)):
     improved_prompt = refine_prompt(version.prompt_text, failure_summary)
 
     # Determine next version number
-    max_version = db.query(PromptVersion).order_by(PromptVersion.version_number.desc()).first()
+    max_version = (
+        db.query(PromptVersion)
+        .filter(PromptVersion.scenario_id == version.scenario_id)
+        .order_by(PromptVersion.version_number.desc())
+        .first()
+    )
     next_number = (max_version.version_number if max_version else 0) + 1
 
     new_version = PromptVersion(
+        scenario_id=version.scenario_id,
         version_number=next_number,
         prompt_text=improved_prompt,
         accuracy_score=None,
