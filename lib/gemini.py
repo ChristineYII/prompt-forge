@@ -50,7 +50,10 @@ def generate_prompt_candidates(scenario_description: str, tool_schemas: list[dic
     Ask Gemini to write 2 distinct system prompts for the scenario.
     Returns a list of 2 prompt strings.
     """
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel(
+        model_name="gemini-2.5-flash",
+        temperature = 1.0,
+    )
     tool_names = ", ".join(s["name"] for s in tool_schemas)
 
     response = model.generate_content(
@@ -91,6 +94,7 @@ def call_with_system_prompt(
         "gemini-2.5-flash",
         tools=[_to_tool(tool_schemas)],
         system_instruction=system_prompt,
+        temperature = 0.0,
     )
 
     response = model.generate_content(user_message)
@@ -114,7 +118,10 @@ def refine_prompt(current_prompt: str, failure_summary: str) -> str:
     Takes the current system prompt + failure summary.
     Returns an improved prompt targeting those failures.
     """
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel(
+        model_name="gemini-2.5-flash",
+        temperature = 1.0,
+    )
 
     response = model.generate_content(
         f"""You are a prompt engineer improving a system prompt for an AI tool-calling agent.
