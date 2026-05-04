@@ -2,13 +2,26 @@
 {% block content %}
 
 <div class="space-y-6">
-  <h1 class="text-2xl font-bold">All Prompt Versions</h1>
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <a href="/" class="text-sm text-gray-400 hover:text-gray-600">← Scenarios</a>
+      <h1 class="text-2xl font-bold mt-1">{{ scenario.name }} — Prompt Versions</h1>
+    </div>
+    <form method="post" action="/scenarios/{{ scenario.id }}/generate">
+      <button type="submit"
+              class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg text-sm">
+        Generate 2 More Candidates
+      </button>
+    </form>
+  </div>
 
   {% if not versions %}
-    <p class="text-gray-500">
-      No versions yet.
-      <a href="/" class="text-blue-600 underline">Go to the home page to generate.</a>
-    </p>
+    <div class="bg-white rounded-lg border p-8 text-center text-gray-500">
+      No prompt versions yet.
+      <form method="post" action="/scenarios/{{ scenario.id }}/generate" class="inline">
+        <button type="submit" class="text-blue-600 hover:underline ml-1">Generate candidates</button>
+      </form>
+    </div>
   {% else %}
     <div class="overflow-x-auto">
       <table class="w-full text-sm border-collapse bg-white rounded-lg border">
@@ -23,7 +36,6 @@
         </thead>
         <tbody>
           {% for v in versions %}
-            {# Jinja2 if/else — same as Python #}
             <tr class="{% if v.id == best_id %}border-l-4 border-l-yellow-400{% endif %}">
               <td class="px-4 py-3 border-b font-medium">
                 v{{ v.version_number }}
@@ -33,7 +45,7 @@
               </td>
               <td class="px-4 py-3 border-b">
                 {% if v.accuracy_score is none %}
-                  <span class="text-gray-400">Not evaluated</span>
+                  <span class="text-gray-400">—</span>
                 {% elif v.accuracy_score >= 0.8 %}
                   <span class="text-green-600 font-semibold">{{ (v.accuracy_score * 100) | int }}%</span>
                 {% else %}
@@ -51,13 +63,12 @@
               </td>
               <td class="px-4 py-3 border-b space-x-3">
                 {% if v.accuracy_score is none %}
-                  <button
-                    id="eval-btn-{{ v.id }}"
-                    onclick="handleEvaluate({{ v.id }})"
-                    class="text-sm bg-green-600 hover:bg-green-700 text-white font-medium px-3 py-1 rounded"
-                  >
-                    Evaluate
-                  </button>
+                  <form method="post" action="/evaluate/{{ v.id }}" style="display:inline">
+                    <button type="submit"
+                            class="text-sm bg-green-600 hover:bg-green-700 text-white font-medium px-3 py-1 rounded">
+                      Evaluate
+                    </button>
+                  </form>
                 {% else %}
                   <a href="/results/{{ v.id }}" class="text-blue-600 hover:underline text-sm">
                     View Results
@@ -85,43 +96,20 @@
 
     const rect = cell.getBoundingClientRect();
     const gap = 8;
-
-    // Prefer below the cell; flip above if it would go off-screen
     const spaceBelow = window.innerHeight - rect.bottom;
     if (spaceBelow >= 160 || spaceBelow >= window.innerHeight - rect.top) {
       tooltip.style.top = (rect.bottom + window.scrollY + gap) + "px";
+      tooltip.style.bottom = "";
     } else {
       tooltip.style.top = "";
       tooltip.style.bottom = (window.innerHeight - rect.top + gap - window.scrollY) + "px";
     }
-
-    // Align to left edge of cell, but don't overflow right side of viewport
     const left = Math.min(rect.left, window.innerWidth - tooltip.offsetWidth - 16);
     tooltip.style.left = Math.max(8, left) + "px";
   }
 
   function hidePrompt() {
     document.getElementById("prompt-tooltip").classList.add("hidden");
-  }
-
-  async function handleEvaluate(versionId) {
-    const btn = document.getElementById("eval-btn-" + versionId);
-    btn.textContent = "Evaluating…";
-    btn.disabled = true;
-
-    try {
-      const res = await fetch("/api/evaluate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt_version_id: versionId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Unknown error");
-      window.location.href = "/results/" + versionId;
-    } catch (e) {
-      btn.textContent = "Error: " + e.message;
-      btn.disabled = false;
-    }
   }
 </script>
 

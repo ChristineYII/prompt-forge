@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="space-y-6 max-w-2xl">
+  <div>
+    <a href="/" class="text-sm text-gray-400 hover:text-gray-600">← Scenarios</a>
+    <h1 class="text-2xl font-bold mt-1">New Scenario</h1>
+  </div>
+
+  {% if error %}
+    <div class="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  <form method="post" action="/scenarios" class="space-y-6">
+    <div class="bg-white rounded-lg border p-5 space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Scenario Name</label>
+        <input type="text" name="name" required
+               value="{{ form_data.name if form_data else '' }}"
+               placeholder="e.g. E-commerce Customer Service"
+               class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Scenario Description</label>
+        <textarea name="description" required rows="3"
+                  placeholder="Describe the agent's role and when it should or should not call tools..."
+                  class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ form_data.description if form_data else '' }}</textarea>
+      </div>
+    </div>
+
+    <div>
+      <h2 class="font-semibold mb-3">Tools</h2>
+      <div class="space-y-3" id="tools-container">
+
+        <div class="tool-entry bg-white rounded-lg border p-4 space-y-3">
+          <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Tool 1</p>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Function Signature</label>
+            <input type="text" name="tool_sig_0" required
+                   placeholder="lookup_order(order_id: str) -> dict"
+                   class="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Description</label>
+            <textarea name="tool_desc_0" required rows="2"
+                      placeholder="Look up the current status of an order. Use this when the customer asks where their order is..."
+                      class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+          </div>
+        </div>
+
+      </div>
+
+      <button type="button" id="add-tool"
+              class="mt-3 text-sm text-blue-600 hover:text-blue-800 font-medium">
+        + Add another tool
+      </button>
+    </div>
+
+    <button type="submit"
+            class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-lg">
+      Parse &amp; Preview →
+    </button>
+  </form>
+</div>
+
+<script>
+  let toolCount = 1;
+
+  document.getElementById('add-tool').addEventListener('click', () => {
+    const container = document.getElementById('tools-container');
+    const i = toolCount++;
+    const div = document.createElement('div');
+    div.className = 'tool-entry bg-white rounded-lg border p-4 space-y-3';
+    div.innerHTML = `
+      <div class="flex items-center justify-between">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Tool ${i + 1}</p>
+        <button type="button" onclick="this.closest('.tool-entry').remove()"
+                class="text-xs text-red-400 hover:text-red-600">Remove</button>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Function Signature</label>
+        <input type="text" name="tool_sig_${i}" required
+               placeholder="process_refund(order_id: str, reason: str) -> dict"
+               class="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Description</label>
+        <textarea name="tool_desc_${i}" required rows="2"
+                  placeholder="Describe when the agent should call this tool..."
+                  class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+</script>
+
+{% endblock %}

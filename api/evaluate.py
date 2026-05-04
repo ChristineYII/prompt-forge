@@ -17,22 +17,35 @@ class EvaluateRequest(BaseModel):
 @router.post("/evaluate")
 def evaluate(body: EvaluateRequest, db: Session = Depends(get_db)):
     """
-    Run a prompt version against all test cases.
-    Saves one EvaluationResult per test case. Updates accuracy score on the version.
+    Run a prompt version against all test cases of its scenario.
+    Saves one EvaluationResult per test case. Updates accuracy on the version.
     """
     version = db.query(PromptVersion).filter(PromptVersion.id == body.prompt_version_id).first()
     if not version:
         raise HTTPException(status_code=404, detail="Prompt version not found")
 
-    test_cases = db.query(TestCase).all()
-    results = []
+    # ⚠️ Critical: filter by scenario_id, not all test cases in the DB.
+    # Without this filter, every scenario's evaluation would mix in foreign cases,
+    # making v1→v2→v3 results unstable across runs.
+    test_cases = db.query(TestCase).filter_by(scenario_id=version.scenario_id).all()
 
-    # Sequential loop — Vertex AI has rate limits, so we call one at a time.
+    if not test_cases:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No test cases found for scenario_id={version.scenario_id}. "
+                   f"Run seed_phase0.py or create test cases first."
+        )
+
+    # Use the scenario's tool schemas if available (Phase 1+),
+    # else fall back to the legacy global TOOL_SCHEMAS constant (Phase 0).
+    tools = version.scenario.tools_json if version.scenario.tools_json else TOOL_SCHEMAS
+
+    results = []
     for test_case in test_cases:
         actual = call_with_system_prompt(
             system_prompt=version.prompt_text,
             user_message=test_case.user_message,
-            tool_schemas=TOOL_SCHEMAS,
+            tool_schemas=tools,
         )
 
         outcome = evaluate_single_call(
@@ -54,7 +67,6 @@ def evaluate(body: EvaluateRequest, db: Session = Depends(get_db)):
 
     passed_count = sum(1 for r in results if r["passed"])
     accuracy_score = passed_count / len(results)
-
     version.accuracy_score = accuracy_score
     db.commit()
 

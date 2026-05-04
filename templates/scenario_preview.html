@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="space-y-6 max-w-2xl">
+  <div>
+    <a href="/scenarios/new" class="text-sm text-gray-400 hover:text-gray-600">← Edit</a>
+    <h1 class="text-2xl font-bold mt-1">Preview: {{ scenario.name }}</h1>
+    <p class="text-gray-500 text-sm mt-1">
+      Review the parsed tool schemas. If anything looks wrong, go back and fix the signatures.
+    </p>
+  </div>
+
+  <div class="bg-white rounded-lg border p-5 space-y-2">
+    <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Scenario Description</p>
+    <p class="text-gray-700 text-sm">{{ scenario.description }}</p>
+  </div>
+
+  <div class="space-y-3">
+    <h2 class="font-semibold">Parsed Tool Schemas</h2>
+    {% for tool in scenario.tools_json %}
+      <div class="bg-white rounded-lg border p-4 space-y-3">
+        <div>
+          <code class="font-mono font-semibold text-sm">{{ tool.name }}</code>
+          <p class="text-gray-600 text-sm mt-1">{{ tool.description }}</p>
+        </div>
+        {% if tool.parameters.properties %}
+          <div>
+            <p class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">Parameters</p>
+            <div class="flex flex-wrap gap-2">
+              {% for param_name, param_schema in tool.parameters.properties.items() %}
+                <span class="bg-gray-100 text-gray-700 text-xs font-mono px-2 py-1 rounded">
+                  {{ param_name }}: {{ param_schema.type }}
+                  {% if param_name in tool.parameters.required %}
+                    <span class="text-red-500 ml-0.5">*</span>
+                  {% endif %}
+                </span>
+              {% endfor %}
+            </div>
+          </div>
+        {% else %}
+          <p class="text-xs text-gray-400">No parameters</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  <form method="post" action="/scenarios/{{ scenario.id }}/gen-tests"
+        class="flex items-center gap-3">
+    <div class="flex items-center gap-2">
+      <label for="count" class="text-sm text-gray-600 whitespace-nowrap">Number of test cases</label>
+      <input type="number" id="count" name="count" value="12" min="12" max="500"
+             class="w-20 border rounded-lg px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500">
+    </div>
+    <button type="submit"
+            class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-lg whitespace-nowrap">
+      Generate Test Cases with DeepSeek →
+    </button>
+  </form>
+</div>
+
+{% endblock %}

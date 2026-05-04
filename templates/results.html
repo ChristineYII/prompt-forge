@@ -3,10 +3,11 @@
 
 <div class="space-y-8">
 
-  <!-- Section 1: Header -->
   <div class="flex items-start justify-between gap-4 flex-wrap">
     <div>
-      <h1 class="text-2xl font-bold">
+      <a href="/scenarios/{{ scenario_id }}/versions"
+         class="text-sm text-gray-400 hover:text-gray-600">← All versions</a>
+      <h1 class="text-2xl font-bold mt-1">
         Prompt v{{ version.version_number }} — Evaluation Results
       </h1>
       {% if version.accuracy_score is not none %}
@@ -20,19 +21,14 @@
       </p>
     </div>
 
-    <div class="flex flex-col gap-2 items-end">
-      <button
-        id="refine-btn"
-        onclick="handleRefine({{ version.id }})"
-        class="bg-purple-600 hover:bg-purple-700 text-white font-medium px-5 py-2.5 rounded-lg"
-      >
+    <form method="post" action="/refine/{{ version.id }}">
+      <button type="submit"
+              class="bg-purple-600 hover:bg-purple-700 text-white font-medium px-5 py-2.5 rounded-lg">
         Refine this prompt
       </button>
-      <a href="/versions" class="text-sm text-blue-600 hover:underline">← All versions</a>
-    </div>
+    </form>
   </div>
 
-  <!-- Section 2: Failure breakdown -->
   {% if failure_entries %}
     <section class="bg-white border rounded-lg p-5 space-y-3">
       <h2 class="font-semibold">Failure Breakdown</h2>
@@ -55,7 +51,6 @@
     </section>
   {% endif %}
 
-  <!-- Section 3: Per-test-case table -->
   <section>
     <h2 class="font-semibold mb-3">Per-Test Results</h2>
     <div class="overflow-x-auto">
@@ -71,13 +66,12 @@
           </tr>
         </thead>
         <tbody>
-          {# loop.index is Jinja2's built-in loop counter, starting at 1 — like enumerate() #}
           {% for r in version.results %}
             <tr>
               <td class="px-3 py-3 border-b text-gray-400">{{ loop.index }}</td>
               <td class="px-3 py-3 border-b max-w-xs text-gray-700">{{ r.test_case.user_message }}</td>
               <td class="px-3 py-3 border-b font-mono text-xs text-gray-600">
-                {{ r.test_case.expected_function_name }}
+                {{ r.test_case.expected_function_name or "—" }}
               </td>
               <td class="px-3 py-3 border-b font-mono text-xs text-gray-600">
                 {{ r.actual_function_name or "—" }}
@@ -98,29 +92,7 @@
       </table>
     </div>
   </section>
+
 </div>
-
-<script>
-  async function handleRefine(versionId) {
-    const btn = document.getElementById("refine-btn");
-    btn.textContent = "Refining…";
-    btn.disabled = true;
-
-    try {
-      const res = await fetch("/api/refine", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt_version_id: versionId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Unknown error");
-
-      window.location.href = "/results/" + data.new_version_id;
-    } catch (e) {
-      btn.textContent = "Error: " + e.message;
-      btn.disabled = false;
-    }
-  }
-</script>
 
 {% endblock %}

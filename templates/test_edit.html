@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="space-y-6 max-w-2xl">
+  <div>
+    <a href="/scenarios/{{ scenario.id }}/tests"
+       class="text-sm text-gray-400 hover:text-gray-600">← Back to test cases</a>
+    <h1 class="text-2xl font-bold mt-1">Edit Test Case</h1>
+  </div>
+
+  <form method="post"
+        action="/scenarios/{{ scenario.id }}/tests/{{ tc.id }}/update"
+        class="space-y-4">
+    <div class="bg-white rounded-lg border p-5 space-y-4">
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">User Message</label>
+        <textarea name="user_message" required rows="3"
+                  class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ tc.user_message }}</textarea>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Expected Tool</label>
+        <select name="expected_function_name"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="" {% if not tc.expected_function_name %}selected{% endif %}>
+            No tool call (plain text response)
+          </option>
+          {% for tool in scenario.tools_json %}
+            <option value="{{ tool.name }}"
+                    {% if tc.expected_function_name == tool.name %}selected{% endif %}>
+              {{ tool.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          Expected Parameters <span class="text-gray-400 font-normal">(JSON)</span>
+        </label>
+        <textarea name="expected_params" rows="4"
+                  placeholder='{"order_id": "12345"}'
+                  class="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">{{ params_json }}</textarea>
+        <p class="text-xs text-gray-400 mt-1">
+          Leave empty if no tool call expected.
+        </p>
+      </div>
+
+    </div>
+
+    <div class="flex gap-3">
+      <a href="/scenarios/{{ scenario.id }}/tests"
+         class="border rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+        Cancel
+      </a>
+      <button type="submit"
+              class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2 rounded-lg text-sm">
+        Save Changes
+      </button>
+    </div>
+  </form>
+</div>
+
+{% endblock %}
