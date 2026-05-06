@@ -1,6 +1,7 @@
 import json
 import re
 from collections import Counter
+from functools import partial
 
 from fastapi import FastAPI, Request, Depends
 from fastapi.templating import Jinja2Templates
@@ -9,10 +10,11 @@ from sqlalchemy.orm import Session, joinedload
 from dotenv import load_dotenv
 
 from lib.db import create_tables, get_db, SessionLocal, Scenario, PromptVersion, TestCase, EvaluationResult
-from lib.gemini import generate_prompt_candidates, call_with_system_prompt, refine_prompt
+from lib.prompt_ops import generate_prompt_candidates, call_with_system_prompt, refine_prompt, judge_semantic_equivalence
 from lib.evaluator import evaluate_single_call, build_failure_summary
 from lib.utils import parse_tool_signature
 from lib.test_gen import generate_test_cases
+from lib.models import role_config_from_env
 
 load_dotenv()
 
@@ -20,6 +22,7 @@ app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
 create_tables()
+role_config = role_config_from_env()
 
 
 # ── Scenario routes ───────────────────────────────────────────────────────────
@@ -98,7 +101,7 @@ async def gen_tests(request: Request, scenario_id: int, db: Session = Depends(ge
     db.query(TestCase).filter(TestCase.scenario_id == scenario_id).delete()
     db.commit()
 
-    cases = generate_test_cases(scenario.description, scenario.tools_json, count=count)
+    cases = generate_test_cases(scenario.description, scenario.tools_json, role_config.test_gen, count=count)
     for case in cases:
         db.add(TestCase(
             scenario_id=scenario_id,
@@ -186,7 +189,7 @@ def do_generate(scenario_id: int, db: Session = Depends(get_db)):
     if not scenario:
         return HTMLResponse("Scenario not found", status_code=404)
 
-    prompts = generate_prompt_candidates(scenario.description, scenario.tools_json)
+    prompts = generate_prompt_candidates(scenario.description, scenario.tools_json, role_config.generator)
     max_v = (
         db.query(PromptVersion)
         .filter(PromptVersion.scenario_id == scenario_id)
@@ -242,10 +245,12 @@ def do_evaluate(version_id: int, db: Session = Depends(get_db)):
 
     results = []
     for test_case in test_cases:
+        judge = partial(judge_semantic_equivalence, user_message=test_case.user_message, config=role_config.judge)
         actual = call_with_system_prompt(
             system_prompt=version.prompt_text,
             user_message=test_case.user_message,
             tool_schemas=scenario.tools_json,
+            config=role_config.candidate,
         )
         outcome = evaluate_single_call(
             expected={
@@ -253,6 +258,8 @@ def do_evaluate(version_id: int, db: Session = Depends(get_db)):
                 "params": test_case.expected_params,
             },
             actual=actual,
+            semantic_value_judge=judge,
+            user_message=test_case.user_message,
         )
         db.add(EvaluationResult(
             prompt_version_id=version.id,
@@ -290,14 +297,16 @@ def do_refine(version_id: int, db: Session = Depends(get_db)):
             "passed": r.passed,
             "failure_type": r.failure_type,
             "actual_function_name": r.actual_function_name,
+            "actual_params": r.actual_params,
             "test_case": {
                 "user_message": r.test_case.user_message,
                 "expected_function_name": r.test_case.expected_function_name,
+                "expected_params": r.test_case.expected_params,
             },
         }
         for r in raw_results
     ]
-    improved_prompt = refine_prompt(version.prompt_text, build_failure_summary(results))
+    improved_prompt = refine_prompt(version.prompt_text, build_failure_summary(results), role_config.generator)
     max_v = (
         db.query(PromptVersion)
         .filter(PromptVersion.scenario_id == version.scenario_id)

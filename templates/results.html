@@ -57,35 +57,105 @@
       <table class="w-full text-sm border-collapse bg-white rounded-lg border">
         <thead>
           <tr class="bg-gray-50 text-left text-gray-500 uppercase text-xs tracking-wide">
-            <th class="px-3 py-3 border-b">#</th>
+            <th class="px-3 py-3 border-b w-6">#</th>
             <th class="px-3 py-3 border-b">User Message</th>
             <th class="px-3 py-3 border-b">Expected</th>
             <th class="px-3 py-3 border-b">Actual</th>
-            <th class="px-3 py-3 border-b">Result</th>
-            <th class="px-3 py-3 border-b">Failure Type</th>
+            <th class="px-3 py-3 border-b w-16">Result</th>
+            <th class="px-3 py-3 border-b">Failure</th>
           </tr>
         </thead>
         <tbody>
-          {% for r in version.results %}
-            <tr>
-              <td class="px-3 py-3 border-b text-gray-400">{{ loop.index }}</td>
-              <td class="px-3 py-3 border-b max-w-xs text-gray-700">{{ r.test_case.user_message }}</td>
-              <td class="px-3 py-3 border-b font-mono text-xs text-gray-600">
-                {{ r.test_case.expected_function_name or "—" }}
+          {% for r in version.results | sort(attribute='test_case_id') %}
+            <tr class="{% if not r.passed %}bg-red-50{% endif %} border-b align-top">
+
+              <td class="px-3 py-3 text-gray-400 align-top">{{ loop.index }}</td>
+
+              <td class="px-3 py-3 max-w-xs text-gray-700 align-top">
+                {{ r.test_case.user_message }}
               </td>
-              <td class="px-3 py-3 border-b font-mono text-xs text-gray-600">
-                {{ r.actual_function_name or "—" }}
+
+              {# ── Expected column ── #}
+              <td class="px-3 py-3 font-mono text-xs align-top">
+                <div class="font-semibold text-gray-800">
+                  {{ r.test_case.expected_function_name or "—" }}
+                </div>
+                {% if r.test_case.expected_params %}
+                  <div class="mt-1 space-y-0.5">
+                    {% for k, v in r.test_case.expected_params.items() %}
+                      {# Red when this key is absent from the actual call #}
+                      {% if not r.passed and r.failure_type == 'missing_param'
+                            and (r.actual_params is none or k not in r.actual_params) %}
+                        <div class="text-red-600 font-semibold">
+                          {{ k }}: {% if v is string %}"{{ v }}"{% else %}{{ v }}{% endif %}
+                          <span class="text-red-400 font-normal ml-1">← missing</span>
+                        </div>
+                      {# Amber when this key is present but value differs #}
+                      {% elif not r.passed and r.failure_type in ('value_error', 'type_mismatch')
+                              and r.actual_params is not none and k in r.actual_params
+                              and r.actual_params[k] != v %}
+                        <div class="text-amber-700 font-semibold">
+                          {{ k }}: {% if v is string %}"{{ v }}"{% else %}{{ v }}{% endif %}
+                          <span class="text-amber-500 font-normal ml-1">← expected</span>
+                        </div>
+                      {% else %}
+                        <div class="text-gray-500">
+                          {{ k }}: {% if v is string %}"{{ v }}"{% else %}{{ v }}{% endif %}
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% endif %}
               </td>
-              <td class="px-3 py-3 border-b">
+
+              {# ── Actual column ── #}
+              <td class="px-3 py-3 font-mono text-xs align-top">
+                <div class="font-semibold
+                  {% if not r.passed and r.failure_type == 'wrong_function' %}text-red-600
+                  {% else %}text-gray-800{% endif %}">
+                  {{ r.actual_function_name or "—" }}
+                </div>
+                {% if r.actual_params %}
+                  <div class="mt-1 space-y-0.5">
+                    {% for k, v in r.actual_params.items() %}
+                      {# Orange when this key should not be here #}
+                      {% if not r.passed and r.failure_type == 'hallucinated_param'
+                            and (r.test_case.expected_params is none or k not in r.test_case.expected_params) %}
+                        <div class="text-orange-600 font-semibold">
+                          {{ k }}: {% if v is string %}"{{ v }}"{% else %}{{ v }}{% endif %}
+                          <span class="text-orange-400 font-normal ml-1">← unexpected</span>
+                        </div>
+                      {# Amber when value differs from expected #}
+                      {% elif not r.passed and r.failure_type in ('value_error', 'type_mismatch')
+                              and r.test_case.expected_params is not none and k in r.test_case.expected_params
+                              and r.test_case.expected_params[k] != v %}
+                        <div class="text-amber-700 font-semibold">
+                          {{ k }}: {% if v is string %}"{{ v }}"{% else %}{{ v }}{% endif %}
+                          <span class="text-amber-500 font-normal ml-1">← got</span>
+                        </div>
+                      {% else %}
+                        <div class="text-gray-500">
+                          {{ k }}: {% if v is string %}"{{ v }}"{% else %}{{ v }}{% endif %}
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </td>
+
+              <td class="px-3 py-3 align-top">
                 {% if r.passed %}
                   <span class="text-green-600 font-semibold">Pass</span>
                 {% else %}
                   <span class="text-red-600 font-semibold">Fail</span>
                 {% endif %}
               </td>
-              <td class="px-3 py-3 border-b text-gray-500 text-xs">
+
+              <td class="px-3 py-3 align-top text-xs
+                {% if not r.passed %}text-red-500 font-medium{% else %}text-gray-400{% endif %}">
                 {{ r.failure_type or "—" }}
               </td>
+
             </tr>
           {% endfor %}
         </tbody>

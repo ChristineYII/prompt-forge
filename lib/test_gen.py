@@ -1,32 +1,16 @@
 import json
-import os
+import re
 
-from openai import OpenAI
-
-_client: OpenAI | None = None
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(
-            api_key=os.environ["DEEPSEEK_API_KEY"],
-            base_url=DEEPSEEK_BASE_URL,
-        )
-    return _client
+from lib.llm import complete
+from lib.models import ModelConfig
 
 
 def generate_test_cases(
     scenario_description: str,
     tool_schemas: list[dict],
+    config: ModelConfig,
     count: int = 12,
 ) -> list[dict]:
-    """
-    Use DeepSeek to generate `count` diverse test cases (minimum 12) for the given scenario and tools.
-    Returns a list of dicts with keys: user_message, expected_function_name, expected_params.
-    """
     tool_info = "\n".join(
         f"- {s['name']}: {s['description']}" for s in tool_schemas
     )
@@ -59,20 +43,15 @@ Return a JSON object with a single key "test_cases" containing exactly {count} i
   ]
 }}"""
 
-    response = _get_client().chat.completions.create(
-        model=DEEPSEEK_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-    )
+    text = complete(config, prompt, temperature=1.0)
+    json_match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not json_match:
+        raise ValueError(f"Model did not return valid JSON. Got: {text}")
 
-    data = json.loads(response.choices[0].message.content)
-    cases: list[dict] = data["test_cases"]
-
-    # Normalise JSON nulls that arrive as the string "null"
+    cases: list[dict] = json.loads(json_match.group())["test_cases"]
     for case in cases:
         if case.get("expected_function_name") == "null":
             case["expected_function_name"] = None
         if case.get("expected_params") == "null":
             case["expected_params"] = None
-
     return cases

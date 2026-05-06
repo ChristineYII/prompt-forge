@@ -3,6 +3,7 @@ uvicorn[standard]
 sqlalchemy
 google-generativeai
 openai
+anthropic
 python-dotenv
 jinja2
 python-multipart

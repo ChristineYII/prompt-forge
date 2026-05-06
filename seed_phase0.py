@@ -31,7 +31,10 @@ CUSTOMER_SERVICE_TOOLS = [
         "description": (
             "Initiate a refund for a customer order. Use this only when the customer "
             "explicitly requests a refund, mentions being charged incorrectly, or wants "
-            "to return an item. Do not use this just because the customer is unhappy."
+            "to return an item. Do not use this just because the customer is unhappy. "
+            "The 'reason' field must reflect the customer's own stated reason — never "
+            "invent or infer a reason. If the customer has not explained why, ask before "
+            "calling this tool."
         ),
         "parameters": {
             "type": "object",
@@ -96,13 +99,14 @@ PHASE0_TEST_CASES = [
      "expected_function_name": "escalate_to_human",
      "expected_params": {"reason": "customer has contacted support multiple times without resolution"}},
     {"user_message": "Order 33333 shows as delivered but I never received it.",
-     "expected_function_name": "process_refund",
-     "expected_params": {"order_id": "33333", "reason": "order marked delivered but never received"}},
+     "expected_function_name": "lookup_order",
+     "expected_params": {"order_id": "33333"}},
 
     # ── Missing param traps (2) ───────────────────────────────────────────────
+    # Agent must ask for the reason — not invent one — before calling process_refund.
     {"user_message": "I would like a refund on order 88888.",
-     "expected_function_name": "process_refund",
-     "expected_params": {"order_id": "88888", "reason": "customer requested refund"}},
+     "expected_function_name": None, "expected_params": None},
+    # "Wrong charge" is a stated reason, so process_refund is correct here.
     {"user_message": "Wrong charge on order 44444.",
      "expected_function_name": "process_refund",
      "expected_params": {"order_id": "44444", "reason": "incorrect charge"}},

@@ -1,0 +1,204 @@
+import json
+import os
+from typing import Any, Optional
+
+import google.generativeai as genai
+from google.generativeai import protos
+from google.generativeai.types import GenerationConfig
+
+try:
+    from openai import OpenAI
+except ModuleNotFoundError:
+    OpenAI = None
+
+try:
+    import anthropic
+except ModuleNotFoundError:
+    anthropic = None
+
+from lib.models import ModelConfig
+
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
+
+# Cached clients — one per provider
+_openai_clients: dict[str, Any] = {}
+_anthropic_client: Optional[Any] = None
+
+_GEMINI_TYPE_MAP = {
+    "string": protos.Type.STRING,
+    "number": protos.Type.NUMBER,
+    "integer": protos.Type.INTEGER,
+    "boolean": protos.Type.BOOLEAN,
+    "object": protos.Type.OBJECT,
+    "array": protos.Type.ARRAY,
+}
+
+_OPENAI_COMPATIBLE_BASE_URLS = {
+    "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
+    "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
+    "openai": (None, "OPENAI_API_KEY"),
+}
+
+
+def _openai_client(provider: str) -> Any:
+    if OpenAI is None:
+        raise RuntimeError(
+            "The openai package is required for provider "
+            f"{provider!r}. Install dependencies with: pip install -r requirements.txt"
+        )
+    if provider not in _openai_clients:
+        base_url, key_name = _OPENAI_COMPATIBLE_BASE_URLS[provider]
+        _openai_clients[provider] = OpenAI(
+            api_key=os.environ[key_name],
+            base_url=base_url,
+        )
+    return _openai_clients[provider]
+
+
+def _anthropic_get_client() -> Any:
+    if anthropic is None:
+        raise RuntimeError(
+            "The anthropic package is required for provider 'anthropic'. "
+            "Install dependencies with: pip install -r requirements.txt"
+        )
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    return _anthropic_client
+
+
+def _to_gemini_tool(tool_schemas: list[dict]) -> protos.Tool:
+    declarations = []
+    for schema in tool_schemas:
+        properties = {
+            name: protos.Schema(
+                type=_GEMINI_TYPE_MAP.get(prop["type"], protos.Type.STRING),
+                description=prop.get("description", ""),
+            )
+            for name, prop in schema["parameters"]["properties"].items()
+        }
+        declarations.append(
+            protos.FunctionDeclaration(
+                name=schema["name"],
+                description=schema["description"],
+                parameters=protos.Schema(
+                    type=protos.Type.OBJECT,
+                    properties=properties,
+                    required=schema["parameters"].get("required", []),
+                ),
+            )
+        )
+    return protos.Tool(function_declarations=declarations)
+
+
+def _to_anthropic_tools(tool_schemas: list[dict]) -> list[dict]:
+    return [
+        {
+            "name": s["name"],
+            "description": s["description"],
+            "input_schema": s["parameters"],
+        }
+        for s in tool_schemas
+    ]
+
+
+def _to_openai_tools(tool_schemas: list[dict]) -> list[dict]:
+    return [{"type": "function", "function": s} for s in tool_schemas]
+
+
+def complete(config: ModelConfig, prompt: str, temperature: float = 0.0) -> str:
+    """Single-turn text completion. Used by generator, judge, and test_gen roles."""
+    if config.provider == "google":
+        model = genai.GenerativeModel(model_name=config.model)
+        response = model.generate_content(
+            prompt,
+            generation_config=GenerationConfig(temperature=temperature),
+        )
+        return response.text or ""
+
+    if config.provider == "anthropic":
+        client = _anthropic_get_client()
+        response = client.messages.create(
+            model=config.model,
+            max_tokens=2048,
+            temperature=temperature,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text if response.content else ""
+
+    # openai | deepseek | openrouter
+    client = _openai_client(config.provider)
+    response = client.chat.completions.create(
+        model=config.model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+    )
+    return response.choices[0].message.content or ""
+
+
+def complete_with_tools(
+    config: ModelConfig,
+    system: str,
+    user_message: str,
+    tool_schemas: list[dict],
+) -> Optional[dict]:
+    """
+    Run the candidate agent with tools.
+    Returns {"function_name": str, "params": dict} or None for plain-text responses.
+    Always temperature=0 for deterministic evaluation.
+    """
+    if config.provider == "google":
+        model = genai.GenerativeModel(
+            config.model,
+            tools=[_to_gemini_tool(tool_schemas)],
+            system_instruction=system,
+        )
+        response = model.generate_content(
+            user_message,
+            generation_config=GenerationConfig(temperature=0),
+        )
+        try:
+            part = response.candidates[0].content.parts[0]
+            if part.function_call.name:
+                return {
+                    "function_name": part.function_call.name,
+                    "params": dict(part.function_call.args),
+                }
+        except (IndexError, AttributeError):
+            pass
+        return None
+
+    if config.provider == "anthropic":
+        client = _anthropic_get_client()
+        response = client.messages.create(
+            model=config.model,
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": user_message}],
+            tools=_to_anthropic_tools(tool_schemas),
+        )
+        for block in response.content:
+            if block.type == "tool_use":
+                return {"function_name": block.name, "params": block.input}
+        return None
+
+    # openai | deepseek | openrouter
+    client = _openai_client(config.provider)
+    response = client.chat.completions.create(
+        model=config.model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_message},
+        ],
+        tools=_to_openai_tools(tool_schemas),
+        tool_choice="auto",
+        temperature=0,
+    )
+    msg = response.choices[0].message
+    if msg.tool_calls:
+        tc = msg.tool_calls[0]
+        return {
+            "function_name": tc.function.name,
+            "params": json.loads(tc.function.arguments),
+        }
+    return None
