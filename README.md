@@ -87,7 +87,19 @@ This separation moves intent-alignment from "is this reason text equivalent?"
 to "did the agent do the right thing?" — which is both more robust to LLM
 phrasing variance and more aligned with what production systems actually care about.
 
-### v0.5 — Adversarial Test Generation (Planned)
+### v0.5 — Real-Data Test Curation (Planned)
 
-Auto-generate boundary cases that target the dominant failure mode identified
-by the Critic, reducing manual test curation effort.
+In production, the most valuable test cases come from real user interactions,
+not synthetic generation. The v0.5 pipeline:
+
+1. **Ingest** production logs (conversation transcripts, tool-call traces)
+2. **Mine** boundary cases — messages where the agent's decision was ambiguous,
+   corrected by a human, or triggered an escalation
+3. **Label** with expected tool call + params using a combination of
+   heuristics and human review
+4. **Deduplicate** against the existing test suite to maximise coverage
+5. **Slot into** the existing evaluate → refine loop without code changes
+
+This approach surfaces failure modes that synthetic generation misses
+(e.g. rare but real phrasing patterns, domain-specific jargon, edge-case
+order IDs) and grounds the eval suite in actual user behaviour.
