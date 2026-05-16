@@ -2,9 +2,8 @@ import json
 import os
 from typing import Any, Optional
 
-import google.generativeai as genai
-from google.generativeai import protos
-from google.generativeai.types import GenerationConfig
+from google import genai
+from google.genai import types
 
 try:
     from openai import OpenAI
@@ -18,19 +17,28 @@ except ModuleNotFoundError:
 
 from lib.models import ModelConfig
 
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
+# ── Google client: API key (AI Studio) or service account (Vertex AI) ─────────
+_api_key = os.environ.get("GEMINI_API_KEY", "")
+if _api_key:
+    _google_client = genai.Client(api_key=_api_key)
+else:
+    _google_client = genai.Client(
+        vertexai=True,
+        project=os.environ.get("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0294441952"),
+        location=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"),
+    )
 
-# Cached clients — one per provider
+# Cached clients — one per OpenAI-compatible provider
 _openai_clients: dict[str, Any] = {}
 _anthropic_client: Optional[Any] = None
 
-_GEMINI_TYPE_MAP = {
-    "string": protos.Type.STRING,
-    "number": protos.Type.NUMBER,
-    "integer": protos.Type.INTEGER,
-    "boolean": protos.Type.BOOLEAN,
-    "object": protos.Type.OBJECT,
-    "array": protos.Type.ARRAY,
+_GENAI_TYPE_MAP = {
+    "string": types.Type.STRING,
+    "number": types.Type.NUMBER,
+    "integer": types.Type.INTEGER,
+    "boolean": types.Type.BOOLEAN,
+    "object": types.Type.OBJECT,
+    "array": types.Type.ARRAY,
 }
 
 _OPENAI_COMPATIBLE_BASE_URLS = {
@@ -67,28 +75,28 @@ def _anthropic_get_client() -> Any:
     return _anthropic_client
 
 
-def _to_gemini_tool(tool_schemas: list[dict]) -> protos.Tool:
+def _to_genai_tool(tool_schemas: list[dict]) -> types.Tool:
     declarations = []
     for schema in tool_schemas:
         properties = {
-            name: protos.Schema(
-                type=_GEMINI_TYPE_MAP.get(prop["type"], protos.Type.STRING),
+            name: types.Schema(
+                type=_GENAI_TYPE_MAP.get(prop["type"], types.Type.STRING),
                 description=prop.get("description", ""),
             )
             for name, prop in schema["parameters"]["properties"].items()
         }
         declarations.append(
-            protos.FunctionDeclaration(
+            types.FunctionDeclaration(
                 name=schema["name"],
                 description=schema["description"],
-                parameters=protos.Schema(
-                    type=protos.Type.OBJECT,
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
                     properties=properties,
                     required=schema["parameters"].get("required", []),
                 ),
             )
         )
-    return protos.Tool(function_declarations=declarations)
+    return types.Tool(function_declarations=declarations)
 
 
 def _to_anthropic_tools(tool_schemas: list[dict]) -> list[dict]:
@@ -109,10 +117,10 @@ def _to_openai_tools(tool_schemas: list[dict]) -> list[dict]:
 def complete(config: ModelConfig, prompt: str, temperature: float = 0.0) -> str:
     """Single-turn text completion. Used by generator, judge, and test_gen roles."""
     if config.provider == "google":
-        model = genai.GenerativeModel(model_name=config.model)
-        response = model.generate_content(
-            prompt,
-            generation_config=GenerationConfig(temperature=temperature),
+        response = _google_client.models.generate_content(
+            model=config.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=temperature),
         )
         return response.text or ""
 
@@ -148,22 +156,22 @@ def complete_with_tools(
     Always temperature=0 for deterministic evaluation.
     """
     if config.provider == "google":
-        model = genai.GenerativeModel(
-            config.model,
-            tools=[_to_gemini_tool(tool_schemas)],
-            system_instruction=system,
-        )
-        response = model.generate_content(
-            user_message,
-            generation_config=GenerationConfig(temperature=0),
+        response = _google_client.models.generate_content(
+            model=config.model,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                tools=[_to_genai_tool(tool_schemas)],
+                temperature=0,
+            ),
         )
         try:
-            part = response.candidates[0].content.parts[0]
-            if part.function_call.name:
-                return {
-                    "function_name": part.function_call.name,
-                    "params": dict(part.function_call.args),
-                }
+            for part in response.candidates[0].content.parts:
+                if part.function_call and part.function_call.name:
+                    return {
+                        "function_name": part.function_call.name,
+                        "params": dict(part.function_call.args),
+                    }
         except (IndexError, AttributeError):
             pass
         return None

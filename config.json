@@ -1,6 +1,6 @@
 {
   "candidate": { "provider": "google",    "model": "gemini-2.5-flash" },
-  "judge":     { "provider": "google",    "model": "gemini-2.0-flash" },
+  "judge":     { "provider": "google",    "model": "gemini-2.5-flash" },
   "generator": { "provider": "google",    "model": "gemini-2.5-flash" },
   "test_gen":  { "provider": "deepseek",  "model": "deepseek-chat"    }
 }

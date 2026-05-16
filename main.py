@@ -245,7 +245,7 @@ def do_evaluate(version_id: int, db: Session = Depends(get_db)):
 
     results = []
     for test_case in test_cases:
-        judge = partial(judge_semantic_equivalence, user_message=test_case.user_message, config=role_config.judge)
+        judge = partial(judge_semantic_equivalence, config=role_config.judge)
         actual = call_with_system_prompt(
             system_prompt=version.prompt_text,
             user_message=test_case.user_message,
@@ -306,7 +306,10 @@ def do_refine(version_id: int, db: Session = Depends(get_db)):
         }
         for r in raw_results
     ]
-    improved_prompt = refine_prompt(version.prompt_text, build_failure_summary(results), role_config.generator)
+    new_prompt, status = refine_prompt(version.prompt_text, build_failure_summary(results), role_config.generator)
+    if new_prompt is None:
+        return HTMLResponse(f"Prompt converged ({status}). No new version created.", status_code=200)
+
     max_v = (
         db.query(PromptVersion)
         .filter(PromptVersion.scenario_id == version.scenario_id)
@@ -316,7 +319,7 @@ def do_refine(version_id: int, db: Session = Depends(get_db)):
     new_version = PromptVersion(
         scenario_id=version.scenario_id,
         version_number=(max_v.version_number if max_v else 0) + 1,
-        prompt_text=improved_prompt,
+        prompt_text=new_prompt,
         accuracy_score=None,
     )
     db.add(new_version)

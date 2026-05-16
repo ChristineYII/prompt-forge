@@ -2,43 +2,33 @@ import json
 import re
 from typing import Optional
 
+from lib.failure_modes import get_mitigation, REGISTRY
 from lib.llm import complete, complete_with_tools
 from lib.models import ModelConfig
 
-_REFINEMENT_STRATEGIES = {
-    "wrong_function": (
-        "Clarify tool-selection boundaries. Add explicit distinctions between tools "
-        "that are easy to confuse, and include examples where the superficially "
-        "plausible tool is not the correct one."
-    ),
-    "missing_param": (
-        "Emphasize required parameters. Tell the agent to extract every required "
-        "field before calling a tool, and to ask a follow-up question when required "
-        "information is missing."
-    ),
-    "hallucinated_param": (
-        "Constrain parameters to the declared schema. Tell the agent to never invent "
-        "extra fields, aliases, or inferred parameters that are not defined by the tool."
-    ),
-    "hallucinated_call": (
-        "Clarify no-tool conditions. Tell the agent when it should answer in plain "
-        "text instead of calling a tool, especially for general questions, small talk, "
-        "or requests outside the available tool scope."
-    ),
-    "type_mismatch": (
-        "Add concrete type guidance. Show examples of valid parameter types and warn "
-        "against passing numeric, boolean, array, or object values as strings."
-    ),
-    "value_error": (
-        "Clarify parameter value extraction. Tell the agent to preserve exact values "
-        "for identifiers and to keep semantic fields faithful to the user's stated "
-        "intent without inventing or substituting a different reason."
-    ),
-    "format_error": (
-        "Strengthen structured tool-call requirements. Tell the agent that when a tool "
-        "is required, it must return a tool call rather than plain text."
-    ),
-}
+# Production threshold: prevents single-signal overfit observed in stress tests
+# where single-case refine introduced new failure modes.
+DEFAULT_MIN_TOTAL_FAILURES_FOR_REFINE = 2
+
+# Demo threshold: allows single-failure signals to trigger refine, useful for
+# demonstrating the v1 → v2 → v3 chain on small test sets. NOT for production.
+DEMO_MIN_TOTAL_FAILURES_FOR_REFINE = 1
+
+
+def _get_refine_threshold(demo_mode: bool = False) -> int:
+    """
+    Production mode (default): threshold=2
+        - prevents single-signal overfit (observed in stress test where
+          single-case refine introduced new failure modes)
+        - regression guard (Lever 2) provides safety net
+
+    Demo mode: threshold=1
+        - allows single-failure signals to trigger refine
+        - useful for demonstrating the v1 → v2 → v3 refine chain
+          on small test sets where failures are sparsely distributed
+        - NOT recommended for production due to overfit risk
+    """
+    return DEMO_MIN_TOTAL_FAILURES_FOR_REFINE if demo_mode else DEFAULT_MIN_TOTAL_FAILURES_FOR_REFINE
 
 
 def _dominant_failure_type(failure_summary: str) -> Optional[str]:
@@ -46,7 +36,13 @@ def _dominant_failure_type(failure_summary: str) -> Optional[str]:
     if not match:
         return None
     failure_type = match.group(1)
-    return failure_type if failure_type in _REFINEMENT_STRATEGIES else None
+    return failure_type if failure_type in REGISTRY else None
+
+
+def _dominant_failure_count(failure_summary: str) -> Optional[int]:
+    """Parse the dominant failure count from a build_failure_summary() string."""
+    match = re.search(r"Dominant failure:\s*[a-z_]+\s*\((\d+)\s*cases?\)", failure_summary)
+    return int(match.group(1)) if match else None
 
 
 def _format_tool_schemas(tool_schemas: list[dict]) -> str:
@@ -136,10 +132,27 @@ def refine_prompt(
     current_prompt: str,
     failure_summary: str,
     config: ModelConfig,
-) -> str:
+    demo_mode: bool = False,
+) -> tuple[str | None, str]:
+    """
+    Returns (new_prompt, status).
+      (None, "converged: ...")  — dominant count below threshold, LLM not called
+      (str,  "refined")        — LLM produced an improved prompt
+
+    demo_mode=True lowers the refine threshold to 1, allowing single-failure
+    signals to trigger refine. Use only for demonstration purposes.
+    """
+    threshold = _get_refine_threshold(demo_mode)
+    dominant_count = _dominant_failure_count(failure_summary)
+    if dominant_count is None or dominant_count < threshold:
+        return None, (
+            f"converged: dominant failure count {dominant_count} "
+            f"< threshold {threshold}"
+        )
+
     dominant_failure_type = _dominant_failure_type(failure_summary)
     strategy = (
-        _REFINEMENT_STRATEGIES[dominant_failure_type]
+        get_mitigation(dominant_failure_type)
         if dominant_failure_type
         else "Use the failure analysis to identify the most likely prompt weakness and make a targeted fix."
     )
@@ -162,4 +175,4 @@ Write an improved system prompt that specifically applies the targeted repair st
 - Keep the prompt concise
 - Return ONLY the improved prompt text, no explanation, no surrounding quotes"""
 
-    return complete(config, prompt, temperature=0.7) or current_prompt
+    return complete(config, prompt, temperature=0.7) or current_prompt, "refined"

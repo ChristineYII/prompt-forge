@@ -1,31 +1,10 @@
-import re
 from typing import Callable, Optional
 from collections import Counter
 
+from lib.failure_modes import classify_failure
+
 FailureType = str  # one of: wrong_function | missing_param | hallucinated_param | type_mismatch | value_error | format_error | hallucinated_call
 SemanticValueJudge = Callable[[str, object, object, str], bool]
-
-SEMANTIC_PARAM_NAMES = {
-    "reason",
-    "description",
-    "summary",
-    "message",
-    "explanation",
-    "details",
-    "intent",
-}
-
-
-def _normalise_text(value: object) -> str:
-    return re.sub(r"\s+", " ", str(value).strip().lower())
-
-
-def _is_semantic_param(name: str, expected_value: object, actual_value: object) -> bool:
-    return (
-        name in SEMANTIC_PARAM_NAMES
-        and isinstance(expected_value, str)
-        and isinstance(actual_value, str)
-    )
 
 
 def evaluate_single_call(
@@ -35,63 +14,20 @@ def evaluate_single_call(
     user_message: str = "",
 ) -> dict:
     """
-    Compare an expected tool call against what Gemini actually produced.
+    Compare an expected tool call against what the model actually produced.
     Returns {"passed": bool, "failure_type": str | None}.
 
     expected["function_name"] may be None, meaning no tool call should be made.
-    Checks are ordered by severity — stop at the first failure found.
+    Failure classification is delegated to failure_modes.classify_failure().
+
+    Note: semantic_value_judge and user_message are kept for API compatibility
+    but no longer invoked. After the informational-field downgrade (v0.3),
+    value_error is only triggered by non-informational fields where strict
+    equality is the correct semantic — no LLM judgment needed.
+    Behavior-level semantic judging is planned for v0.4 (see README).
     """
-    # No tool call expected
-    if expected["function_name"] is None:
-        if actual is None:
-            return {"passed": True, "failure_type": None}
-        return {"passed": False, "failure_type": "hallucinated_call"}
-
-    # Tool call expected but Gemini responded in plain text
-    if actual is None:
-        return {"passed": False, "failure_type": "format_error"}
-
-    if actual["function_name"] != expected["function_name"]:
-        return {"passed": False, "failure_type": "wrong_function"}
-
-    expected_params: dict = expected.get("params") or {}
-    actual_params: dict = actual.get("params") or {}
-
-    # Missing required params: key in expected but not in actual
-    for key in expected_params:
-        if key not in actual_params:
-            return {"passed": False, "failure_type": "missing_param"}
-
-    # Hallucinated params: key in actual but not in expected
-    for key in actual_params:
-        if key not in expected_params:
-            return {"passed": False, "failure_type": "hallucinated_param"}
-
-    # Type mismatches: same key, different Python type
-    for key in expected_params:
-        if type(actual_params[key]) is not type(expected_params[key]):
-            return {"passed": False, "failure_type": "type_mismatch"}
-
-    # Value mismatches: exact fields must match exactly; semantic fields may use
-    # an LLM judge for paraphrases such as "incorrect charge" vs "wrong charge".
-    for key, expected_value in expected_params.items():
-        actual_value = actual_params[key]
-        if expected_value == actual_value:
-            continue
-
-        if _is_semantic_param(key, expected_value, actual_value):
-            if _normalise_text(expected_value) == _normalise_text(actual_value):
-                continue
-            if semantic_value_judge:
-                try:
-                    if semantic_value_judge(key, expected_value, actual_value, user_message):
-                        continue
-                except Exception:
-                    pass
-
-        return {"passed": False, "failure_type": "value_error"}
-
-    return {"passed": True, "failure_type": None}
+    failure_name = classify_failure(actual, expected)
+    return {"passed": failure_name is None, "failure_type": failure_name}
 
 
 def build_failure_summary(results: list[dict]) -> str:
@@ -140,3 +76,40 @@ def build_failure_summary(results: list[dict]) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+def build_failure_metadata(results: list[dict]) -> dict:
+    """
+    Return structured metadata alongside the summary text.
+    Non-breaking companion to build_failure_summary — does not change its signature.
+
+    Returns:
+        summary_text    — identical to build_failure_summary(results)
+        dominant_failure — str | None
+        dominant_count  — int (0 when no failures)
+        total_failures  — int
+        total_cases     — int
+    """
+    summary_text = build_failure_summary(results)
+    failures = [r for r in results if not r["passed"]]
+    total = len(results)
+
+    if not failures:
+        return {
+            "summary_text": summary_text,
+            "dominant_failure": None,
+            "dominant_count": 0,
+            "total_failures": 0,
+            "total_cases": total,
+        }
+
+    counts = Counter(r["failure_type"] for r in failures if r["failure_type"])
+    dominant_type, dominant_count = counts.most_common(1)[0]
+
+    return {
+        "summary_text": summary_text,
+        "dominant_failure": dominant_type,
+        "dominant_count": dominant_count,
+        "total_failures": len(failures),
+        "total_cases": total,
+    }

@@ -1,0 +1,22 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Database
+dev.db
+*.db-shm
+*.db-wal
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Mac system files
+.DS_Store
+
+# Step files (planning docs) — README.md is intentionally tracked
+*.md
+!README.md
