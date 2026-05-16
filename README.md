@@ -1,105 +1,71 @@
-# prompt-forge
+# Prompt Forge
 
-Automated prompt engineering for LLM tool-calling agents: generate, evaluate, and refine system prompts against a deterministic test suite.
+**Agent Skill / MCP Tool 发布前的质量评测与自动修复平台** — 类似 CI 里的单元测试,但针对 Agent 的 system prompt 和工具调用。
 
-## Running the Demo
+自动评测 prompt 质量、按 7 类失败模式归类、生成针对性修复建议,在发布前暴露 prompt 与 tool schema 的不匹配。
 
-### Production Mode (default)
+---
+
+## 核心闭环
+
+```
+Test Generator → Evaluator → Critic → Refined Prompt
+                    ↓
+            Lever 1: 单 case 信号不 refine
+            Lever 2: refine 引入新失败时回滚
+```
+
+---
+
+## 7 类失败模式
+
+每类是 `(detector, mitigation_hint, severity)` 三件套,注册在 `lib/failure_modes.py`。新增类型只需 register 一次,evaluate / critic 核心闭环代码不变。
+
+| Failure Mode | Severity | 含义 |
+|---|---|---|
+| `hallucinated_call` | high | 不该调工具却调了 |
+| `wrong_function` | high | 选错工具 |
+| `format_error` | high | 该调没调,返回纯文本 |
+| `value_error` | high | 类型对、字段对,但值的语义错 |
+| `missing_param` | medium | 缺失必填参数 |
+| `hallucinated_param` | medium | schema 外的额外参数 |
+| `type_mismatch` | low | 参数类型不符 |
+
+---
+
+## Guardrails(stress test 驱动的设计)
+
+早期版本任何失败都 refine。多次 stress test 观察到一种反噬模式:**v1 = 93.8%,refine 一轮后 v2 退化到 81.2%** — 单 case 信号驱动的 refine 容易过拟合,在无关 case 上引入新失败。
+
+- **Lever 1**:总失败 < 2 不 refine
+- **Lever 2**:v_{n+1} 引入新失败时回滚到 v_n(类似 A/B 实验的 guardrail metric)
+
+---
+
+## 实测
 
 ```bash
-python demo_run.py
+python demo_run.py            # production: 单 case 不 refine
+python demo_run.py --demo     # demo: 阈值=1,演示 refine 链路
+pytest tests/ -v              # 38 个回归测试 / 0.18 秒
 ```
 
-Single-case failure signals converge at v1 to prevent Critic overfit.
-This is the recommended mode — refine only triggers when failure signal
-is strong enough (≥ 2 cases).
+真实输出见 [`examples/`](examples/)。
 
-Example output:
-```
-v1: 15/16 (93.8%)
-Failures: {'hallucinated_call': 1}
-Lever 1: v1 converged (dominant failure count 1 < threshold 2)
-```
+Demo 模式经常一次到 100% — 反过来证明 evaluator 的核心价值:**不只是给 accuracy 数字,是给 Critic 一个"值不值得 refine"的判断**。
 
-### Demo Mode (for showcase)
+---
 
-```bash
-python demo_run.py --demo
-```
+## 架构
 
-Lowers refine threshold to 1 to demonstrate the v1 → v2 → v3 chain on
-small test sets. Lever 2 (regression guard) protects against overfit-induced
-degradation.
+`main.py` (FastAPI) · `lib/failure_modes.py` (注册表) · `lib/evaluator.py` (确定性归类) · `lib/prompt_ops.py` (generator + critic) · `tests/` (38 个回归测试)
 
-Example output (illustrative):
-```
-v1: 14/16 (87.5%) → refine
-v2: 15/16 (93.8%) → refine
-v3: 16/16 (100.0%) → converged
-```
+**Evaluator 用确定性逻辑,不用 LLM-as-Judge** — 工具调用输出是结构化的,能确定性判断对错。LLM judge 会带来 bias(position / verbosity / self-enhancement)和成本。有结构的地方用规则,无结构的地方才用 LLM。
 
-### Why Two Modes?
-
-Production mode reflects the design principle that prompt refinement
-should require sufficient signal — refining for a single failed case
-risks introducing new failures elsewhere (observed in stress testing).
-
-Demo mode exists because on a 16-case test set, failures are often
-sparsely distributed (1 case per category), and v1 generator quality
-is already near-ceiling with modern models like Gemini 2.5 Flash.
-Showing the full refine chain requires lowering the threshold for
-demonstration purposes.
-
-In production with 200+ case test sets, failures are dense enough
-that the default threshold (2) is the correct setting — refine triggers
-naturally when there is enough signal to optimise against.
+---
 
 ## Roadmap
 
-### v0.3 (current) — Narrow Tool-Call Evaluator with Informational Fields
+**v0.4 — General Prompt Evaluator**:三层结构 — deterministic checks + behavior-level LLM judge(`expected_behavior` + rubric)+ informational fields(presence only)。把 intent alignment 从"reason 文本等价"提升为 evaluator 一级概念。
 
-- 7 failure modes with deterministic detectors (plugin registry)
-- Each mode: `(detector, mitigation_hint, severity)` triple in `lib/failure_modes.py`
-- Informational fields (`reason`, `description`, etc.) — presence + type checked, content not compared
-- Minimum failure threshold (Lever 1) + Regression guard (Lever 2) for stable refine loops
-
-### v0.4 — General Prompt Evaluator (Planned)
-
-The current evaluator is optimised for narrow tool-calling scenarios.
-A more general design separates concerns into three layers:
-
-**Layer 1 — Deterministic checks** (current behaviour preserved)
-- No-call vs call mismatch
-- Action type / function name
-- Required structured params (IDs, enums, codes)
-
-**Layer 2 — Behaviour-level LLM judge**
-- Expected behaviour oracle (e.g. `"escalate_because_required_identifier_missing"`)
-- Judge rubric per test case (1–3 natural-language criteria)
-- LLM judges whether actual behaviour satisfies expected behaviour,
-  NOT whether free-text params are semantically equal
-
-**Layer 3 — Informational fields**
-- Free-text fields (`reason` / `description` / `summary` / etc.)
-- Presence + type only, no content judgement
-
-This separation moves intent-alignment from "is this reason text equivalent?"
-to "did the agent do the right thing?" — which is both more robust to LLM
-phrasing variance and more aligned with what production systems actually care about.
-
-### v0.5 — Real-Data Test Curation (Planned)
-
-In production, the most valuable test cases come from real user interactions,
-not synthetic generation. The v0.5 pipeline:
-
-1. **Ingest** production logs (conversation transcripts, tool-call traces)
-2. **Mine** boundary cases — messages where the agent's decision was ambiguous,
-   corrected by a human, or triggered an escalation
-3. **Label** with expected tool call + params using a combination of
-   heuristics and human review
-4. **Deduplicate** against the existing test suite to maximise coverage
-5. **Slot into** the existing evaluate → refine loop without code changes
-
-This approach surfaces failure modes that synthetic generation misses
-(e.g. rare but real phrasing patterns, domain-specific jargon, edge-case
-order IDs) and grounds the eval suite in actual user behaviour.
+**v0.5 — Real-Data Test Curation**:从生产日志 mine 边界 case,人工标注后接入 evaluate → refine 闭环,捕获 LLM 合成测试集捕获不到的真实长尾失败。
