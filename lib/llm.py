@@ -18,13 +18,22 @@ except ModuleNotFoundError:
 from lib.models import ModelConfig
 
 # ── Google client: API key (AI Studio) or service account (Vertex AI) ─────────
+# Set GEMINI_API_KEY for AI Studio, or GOOGLE_APPLICATION_CREDENTIALS +
+# GOOGLE_CLOUD_PROJECT (+ optionally GOOGLE_CLOUD_LOCATION) for Vertex AI.
 _api_key = os.environ.get("GEMINI_API_KEY", "")
 if _api_key:
     _google_client = genai.Client(api_key=_api_key)
 else:
+    _project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if not _project:
+        raise EnvironmentError(
+            "Google auth not configured. Set either:\n"
+            "  GEMINI_API_KEY          — for Google AI Studio\n"
+            "  GOOGLE_CLOUD_PROJECT    — for Vertex AI (also set GOOGLE_APPLICATION_CREDENTIALS)"
+        )
     _google_client = genai.Client(
         vertexai=True,
-        project=os.environ.get("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0294441952"),
+        project=_project,
         location=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"),
     )
 
