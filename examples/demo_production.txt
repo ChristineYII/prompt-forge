@@ -1,0 +1,34 @@
+Scenario: Customer Service  |  16 test cases
+Models  : candidate=gemini-2.5-flash  generator=gemini-2.5-flash  judge=gemini-2.5-flash
+Mode    : PRODUCTION (refine threshold=2)
+
+[1/6] Generating prompt candidates...
+      v1 created (id=1, 570 chars)
+[2/6] Evaluating v1 (16 calls to candidate model)...
+
+============================================================
+  v1
+============================================================
+  Accuracy : 14/16  (87.5%)
+  Failures : {'wrong_function': 1, 'hallucinated_call': 1}
+  Failed cases:
+    [wrong_function]  expected=lookup_order  actual=process_refund
+      msg: Order 33333 shows as delivered but I never received it.
+    [hallucinated_call]  expected=(none)  actual=escalate_to_human
+      msg: Do you have a phone number I can call for support?
+
+[3/6] Refining v1 → v2...
+  ✅ Lever 1: v1 converged (total failures=2 but dominant_count=1 < threshold 2).
+     Pipeline stops to prevent single-signal overfit.
+
+============================================================
+  SUMMARY
+============================================================
+  v1: 14/16 (87.5%)
+  Final mode: converged at v1
+  
+Design note: Each remaining failure is an isolated case in a distinct
+failure category. Lever 1 correctly identifies this as a weak signal
+and stops refinement, since stress tests have shown that single-case
+signal can drive Critic into overfit (introducing new failure types
+elsewhere).

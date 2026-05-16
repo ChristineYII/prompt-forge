@@ -1,0 +1,29 @@
+Scenario: Customer Service  |  16 test cases
+Models  : candidate=gemini-2.5-flash  generator=gemini-2.5-flash  judge=gemini-2.5-flash
+Mode    : DEMO (refine threshold=1)
+
+[1/6] Generating prompt candidates...
+      v1 created (id=1, 642 chars)
+[2/6] Evaluating v1 (16 calls to candidate model)...
+
+============================================================
+  v1
+============================================================
+  Accuracy : 16/16  (100.0%)
+  Failures : none
+
+[3/6] Refining v1 → v2...
+  ✅ v1 converged (zero failures — generator output already at test set ceiling).
+
+============================================================
+  SUMMARY
+============================================================
+  v1: 16/16 (100.0%)
+  Final mode: converged at v1 (test set ceiling)
+
+Design note: With Gemini 2.5 Flash and our generator design, v1 frequently
+reaches 100% on this 16-case test set, even in demo mode (threshold=1).
+This validates the evaluator's role: it's not just an accuracy reporter —
+it provides Critic with a "is refinement worthwhile?" judgment. On larger
+industrial test sets (200+ cases) failure density increases naturally,
+and the full v1 → v2 → v3 refine chain engages.
