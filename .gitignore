@@ -17,6 +17,14 @@ __pycache__/
 # Mac system files
 .DS_Store
 
+# Personal / private
+ai-agent-interview-prep/
+.claudeignore
+
+# Logs and debug scripts
+judge_trace.log
+diagnose_judge.py
+
 # Step files (planning docs) — README.md is intentionally tracked
 *.md
 !README.md
